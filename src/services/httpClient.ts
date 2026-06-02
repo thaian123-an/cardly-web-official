@@ -1,5 +1,7 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
+const ACCESS_TOKEN_KEY = "cardly_access_token";
+
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 type RequestConfig = {
@@ -7,6 +9,7 @@ type RequestConfig = {
   body?: unknown;
   headers?: HeadersInit;
   signal?: AbortSignal;
+  skipAuth?: boolean;
 };
 
 export class ApiError extends Error {
@@ -19,6 +22,18 @@ export class ApiError extends Error {
     this.status = status;
     this.data = data;
   }
+}
+
+export function getAccessToken() {
+  return sessionStorage.getItem(ACCESS_TOKEN_KEY);
+}
+
+export function setAccessToken(token: string) {
+  sessionStorage.setItem(ACCESS_TOKEN_KEY, token);
+}
+
+export function removeAccessToken() {
+  sessionStorage.removeItem(ACCESS_TOKEN_KEY);
 }
 
 function buildUrl(endpoint: string) {
@@ -44,33 +59,67 @@ async function parseResponse(response: Response) {
   return response.text();
 }
 
+function getErrorMessage(data: unknown) {
+  if (typeof data === "string" && data.trim()) {
+    return data;
+  }
+
+  if (typeof data === "object" && data !== null) {
+    const record = data as Record<string, unknown>;
+
+    if (typeof record.message === "string") {
+      return record.message;
+    }
+
+    if (typeof record.detail === "string") {
+      return record.detail;
+    }
+
+    if (typeof record.error === "string") {
+      return record.error;
+    }
+
+    if (
+      typeof record.error === "object" &&
+      record.error !== null &&
+      "message" in record.error &&
+      typeof (record.error as { message?: unknown }).message === "string"
+    ) {
+      return (record.error as { message: string }).message;
+    }
+  }
+
+  return "Something went wrong. Please try again.";
+}
+
+function buildHeaders(config: RequestConfig) {
+  const token = getAccessToken();
+
+  return {
+    "Content-Type": "application/json",
+    ...(token && !config.skipAuth ? { Authorization: `Bearer ${token}` } : {}),
+    ...config.headers,
+  };
+}
+
 export async function httpClient<T>(
   endpoint: string,
   config: RequestConfig = {}
 ): Promise<T> {
   const response = await fetch(buildUrl(endpoint), {
     method: config.method || "GET",
-    headers: {
-      "Content-Type": "application/json",
-      ...config.headers,
-    },
-    credentials: "include",
-    body: config.body ? JSON.stringify(config.body) : undefined,
+    headers: buildHeaders(config),
+    body:
+      config.body !== undefined && config.body !== null
+        ? JSON.stringify(config.body)
+        : undefined,
     signal: config.signal,
   });
 
   const data = await parseResponse(response).catch(() => null);
 
   if (!response.ok) {
-    const message =
-      typeof data === "object" &&
-      data !== null &&
-      "message" in data &&
-      typeof data.message === "string"
-        ? data.message
-        : "Something went wrong. Please try again.";
-
-    throw new ApiError(message, response.status, data);
+    throw new ApiError(getErrorMessage(data), response.status, data);
   }
 
   return data as T;

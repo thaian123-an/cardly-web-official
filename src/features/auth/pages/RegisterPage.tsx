@@ -1,5 +1,5 @@
 import { observer } from "mobx-react-lite";
-import { Mail } from "lucide-react";
+import { Mail, User } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AuthInput } from "../components/AuthInput";
@@ -8,6 +8,7 @@ import { PasswordInput } from "../components/PasswordInput";
 import { PasswordRules } from "../components/PasswordRules";
 import { authStore } from "../stores/AuthStore";
 import {
+  isRequired,
   isStrongPassword,
   isValidEmail,
 } from "../../../utils/validators";
@@ -15,6 +16,7 @@ import {
 export const RegisterPage = observer(() => {
   const navigate = useNavigate();
 
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -26,8 +28,10 @@ export const RegisterPage = observer(() => {
   }, []);
 
   const areAllFieldsNonEmpty = useMemo(() => {
-    return Boolean(email.trim() && password && confirmPassword);
-  }, [email, password, confirmPassword]);
+    return Boolean(
+      fullName.trim() && email.trim() && password && confirmPassword
+    );
+  }, [fullName, email, password, confirmPassword]);
 
   const canSubmit = useMemo(() => {
     return (
@@ -44,6 +48,10 @@ export const RegisterPage = observer(() => {
     authStore.clearMessages();
 
     const errors: Record<string, string> = {};
+
+    if (!isRequired(fullName)) {
+      errors.full_name = "Full name is required.";
+    }
 
     if (!email.trim()) {
       errors.email = "Email is required.";
@@ -70,17 +78,18 @@ export const RegisterPage = observer(() => {
     }
 
     const success = await authStore.register({
+      full_name: fullName,
       email,
       password,
       confirmPassword,
     });
 
     if (success) {
-      window.setTimeout(() => {
-        authStore.clearMessages();
-        navigate("/login", { replace: true });
-      }, 1600);
-    }
+  window.setTimeout(() => {
+    authStore.clearMessages();
+    navigate("/otp", { replace: true });
+  }, 1200);
+}
   };
 
   return (
@@ -98,6 +107,17 @@ export const RegisterPage = observer(() => {
         <p className="auth-card__subtitle">Enter your information below</p>
 
         <form className="auth-form" onSubmit={handleSubmit} noValidate>
+          <AuthInput
+            icon={<User size={22} />}
+            placeholder="Full Name"
+            value={fullName}
+            error={authStore.fieldErrors.full_name}
+            onChange={(event) => {
+              setFullName(event.target.value);
+              authStore.clearFieldError("full_name");
+            }}
+          />
+
           <AuthInput
             icon={<Mail size={22} />}
             type="email"

@@ -43,18 +43,17 @@ export const AppLayout = observer(() => {
   const navigate = useNavigate();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  const userName = authStore.user?.name || "Cardly User";
+  const userName = authStore.user?.full_name || "Cardly User";
   const userEmail = authStore.user?.email || "user@cardly.com";
-  const initials =
-    authStore.user?.initials ||
+
+  const userInitials =
     userName
       .split(" ")
       .filter(Boolean)
-      .map((part) => part[0])
-      .slice(0, 2)
+      .map((part: string) => part[0])
       .join("")
-      .toUpperCase() ||
-    "CU";
+      .slice(0, 2)
+      .toUpperCase() || "CU";
 
   const handleLogout = async () => {
     await authStore.logout();
@@ -132,11 +131,13 @@ export const AppLayout = observer(() => {
               className="app-profile-button"
               onClick={() => navigate("/digital-card")}
             >
-              <span className="app-avatar">{initials}</span>
+              <span className="app-avatar">{userInitials}</span>
+
               <span className="app-profile-button__text">
                 <strong>{userName}</strong>
                 <small>{userEmail}</small>
               </span>
+
               <UserRound size={18} />
             </button>
           </div>

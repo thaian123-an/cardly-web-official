@@ -37,7 +37,7 @@ export const ForgotPasswordPage = observer(() => {
     if (success) {
       window.setTimeout(() => {
         authStore.clearMessages();
-        navigate("/otp", { replace: true });
+        navigate("/reset-password", { replace: true });
       }, 700);
     }
   };

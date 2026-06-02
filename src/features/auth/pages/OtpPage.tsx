@@ -19,7 +19,8 @@ export const OtpPage = observer(() => {
     authStore.clearMessages();
 
     if (!authStore.resetEmail) {
-      navigate("/forgot-password", { replace: true });
+      navigate("/register", { replace: true });
+      return;
     }
 
     const timer = window.setInterval(() => {
@@ -39,18 +40,21 @@ export const OtpPage = observer(() => {
     return `${minutesText}:${secondsText}`;
   }, [seconds]);
 
+  const canSubmit = useMemo(() => {
+    return isValidOtp(otp) && seconds > 0 && !authStore.isLoading;
+  }, [otp, seconds]);
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     authStore.clearMessages();
 
     if (seconds <= 0) {
-      authStore.setFieldError("otp", "OTP code has expired");
+      authStore.setFieldError("otp", "OTP code has expired.");
       return;
     }
 
     if (!isValidOtp(otp)) {
-      authStore.setFieldError("otp", "Incorrect OTP code");
-      setOtp("");
+      authStore.setFieldError("otp", "Please enter a valid 6-digit OTP code.");
       return;
     }
 
@@ -59,44 +63,37 @@ export const OtpPage = observer(() => {
     if (success) {
       window.setTimeout(() => {
         authStore.clearMessages();
-        navigate("/reset-password", { replace: true });
-      }, 700);
+        authStore.clearResetEmail();
+        navigate("/login", { replace: true });
+      }, 1400);
     } else {
       setOtp("");
     }
   };
 
-  const handleResendOtp = async () => {
-    if (!authStore.resetEmail) return;
-
-    const success = await authStore.sendOtp(authStore.resetEmail);
-
-    if (success) {
-      setOtp("");
-      setSeconds(OTP_DURATION_SECONDS);
-
-      window.setTimeout(() => {
-        authStore.clearMessages();
-      }, 1800);
-    }
+  const handleChangeEmail = () => {
+    authStore.clearMessages();
+    authStore.clearResetEmail();
+    navigate("/register", { replace: true });
   };
 
   return (
     <AuthLayout
-      title="Verify OTP code"
-      description="Enter the 6-digit code sent to your email before the timer expires."
+      title="Verify your account"
+      description="Enter the 6-digit OTP code sent to your email to activate your Cardly account."
       note={`OTP expires in ${timeText}`}
     >
       <div className="auth-card">
         <button
           type="button"
           className="auth-back-button"
-          onClick={() => navigate("/forgot-password", { replace: true })}
+          onClick={handleChangeEmail}
         >
           <ArrowLeft size={28} />
         </button>
 
         <h2>OTP Verification</h2>
+
         <p className="auth-card__subtitle">
           Code sent to{" "}
           <strong>{authStore.resetEmail || "your registered email"}</strong>
@@ -107,14 +104,15 @@ export const OtpPage = observer(() => {
             icon={<Hash size={22} />}
             inputMode="numeric"
             maxLength={6}
-            placeholder="1 2 3 4 5 6"
+            placeholder="Enter OTP code"
             value={otp}
             error={authStore.fieldErrors.otp}
             className="auth-otp-input"
             onChange={(event) => {
-              const value = event.target.value.replace(/\D/g, "");
+              const value = event.target.value.replace(/\D/g, "").slice(0, 6);
               setOtp(value);
               authStore.clearFieldError("otp");
+              authStore.clearFieldError("general");
             }}
           />
 
@@ -133,24 +131,24 @@ export const OtpPage = observer(() => {
           <button
             type="submit"
             className="auth-primary-button"
-            disabled={authStore.isLoading || otp.length !== 6}
+            disabled={!canSubmit}
           >
-            {authStore.isLoading ? "Verifying..." : "Verify OTP"}
+            {authStore.isLoading ? "Verifying..." : "Verify Account"}
           </button>
 
           <button
             type="button"
             className="auth-secondary-button"
-            onClick={handleResendOtp}
-            disabled={authStore.isLoading || seconds > 0}
+            onClick={handleChangeEmail}
           >
-            {seconds > 0 ? `Resend OTP in ${timeText}` : "Resend OTP"}
+            Change email
           </button>
         </form>
 
         <div className="auth-links-row">
-          <Link to="/forgot-password">Change email</Link>
-          <Link to="/login">Back to login</Link>
+          <Link to="/login" onClick={() => authStore.clearMessages()}>
+            Back to login
+          </Link>
         </div>
       </div>
     </AuthLayout>

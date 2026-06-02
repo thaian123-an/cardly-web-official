@@ -1,7 +1,8 @@
 import { observer } from "mobx-react-lite";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, KeyRound } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { AuthInput } from "../components/AuthInput";
 import { AuthLayout } from "../components/AuthLayout";
 import { PasswordInput } from "../components/PasswordInput";
 import { PasswordRules } from "../components/PasswordRules";
@@ -11,6 +12,7 @@ import { isStrongPassword } from "../../../utils/validators";
 export const ResetPasswordPage = observer(() => {
   const navigate = useNavigate();
 
+  const [otp, setOtp] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
@@ -26,15 +28,21 @@ export const ResetPasswordPage = observer(() => {
 
   const canSubmit = useMemo(() => {
     return (
+      otp.length === 6 &&
       isStrongPassword(password) &&
       password === confirmPassword &&
       !authStore.isLoading
     );
-  }, [password, confirmPassword]);
+  }, [otp, password, confirmPassword]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     authStore.clearMessages();
+
+    if (otp.length !== 6) {
+      authStore.setFieldError("otp", "Please enter a valid 6-digit OTP code.");
+      return;
+    }
 
     if (!isStrongPassword(password)) {
       authStore.setFieldError(
@@ -54,7 +62,8 @@ export const ResetPasswordPage = observer(() => {
 
     const success = await authStore.resetPassword({
       email: authStore.resetEmail,
-      password,
+      otp,
+      new_password: password,
       confirmPassword,
     });
 
@@ -69,24 +78,36 @@ export const ResetPasswordPage = observer(() => {
   return (
     <AuthLayout
       title="Set a new password"
-      description="Use a strong password with uppercase, digit, special character, and no spaces."
-      
+      description="Use the OTP from your email and create a strong new password."
     >
       <div className="auth-card">
         <button
           type="button"
           className="auth-back-button"
-          onClick={() => navigate("/otp", { replace: true })}
+          onClick={() => navigate("/forgot-password", { replace: true })}
         >
           <ArrowLeft size={28} />
         </button>
 
         <h2>Reset Password</h2>
         <p className="auth-card__subtitle">
-          Create a new password for your Cardly account.
+          Enter the OTP sent to <strong>{authStore.resetEmail}</strong> and set
+          your new password.
         </p>
 
         <form className="auth-form" onSubmit={handleSubmit} noValidate>
+          <AuthInput
+            icon={<KeyRound size={22} />}
+            placeholder="OTP Code"
+            value={otp}
+            error={authStore.fieldErrors.otp}
+            maxLength={6}
+            onChange={(event) => {
+              setOtp(event.target.value.replace(/\D/g, ""));
+              authStore.clearFieldError("otp");
+            }}
+          />
+
           <PasswordInput
             placeholder="New Password"
             value={password}

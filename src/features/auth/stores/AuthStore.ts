@@ -1,5 +1,10 @@
 import { makeAutoObservable, runInAction } from "mobx";
 import {
+  getAccessToken,
+  removeAccessToken,
+  setAccessToken,
+} from "../../../services/httpClient";
+import {
   forgotPasswordApi,
   getCurrentUserApi,
   loginApi,
@@ -18,12 +23,14 @@ import type {
 } from "../types/auth.types";
 
 const RESET_EMAIL_KEY = "cardly_reset_email";
+const REFRESH_TOKEN_KEY = "cardly_refresh_token";
 const LOGIN_FAILED_COUNT_KEY = "cardly_login_failed_count";
 const LOGIN_LOCKED_UNTIL_KEY = "cardly_login_locked_until";
 
 class AuthStore {
   user: AuthUser | null = null;
   token: string | null = null;
+  refreshToken: string | null = null;
 
   resetEmail = "";
 
@@ -40,17 +47,21 @@ class AuthStore {
   constructor() {
     makeAutoObservable(this);
 
+    this.token = getAccessToken();
+    this.refreshToken = sessionStorage.getItem(REFRESH_TOKEN_KEY);
     this.resetEmail = sessionStorage.getItem(RESET_EMAIL_KEY) || "";
+
     this.failedLoginCount = Number(
       localStorage.getItem(LOGIN_FAILED_COUNT_KEY) || 0
     );
+
     this.loginLockedUntil = Number(
       localStorage.getItem(LOGIN_LOCKED_UNTIL_KEY) || 0
     );
   }
 
   get isAuthenticated() {
-    return Boolean(this.user);
+    return Boolean(this.token && this.user);
   }
 
   get loginLockRemainingSeconds() {
@@ -105,6 +116,22 @@ class AuthStore {
     sessionStorage.removeItem(RESET_EMAIL_KEY);
   }
 
+  private saveTokens(accessToken: string, refreshToken: string) {
+    this.token = accessToken;
+    this.refreshToken = refreshToken;
+
+    setAccessToken(accessToken);
+    sessionStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  }
+
+  private clearTokens() {
+    this.token = null;
+    this.refreshToken = null;
+
+    removeAccessToken();
+    sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+  }
+
   private resetFailedLoginAttempts() {
     this.failedLoginCount = 0;
     this.loginLockedUntil = 0;
@@ -126,50 +153,38 @@ class AuthStore {
     }
   }
 
-  async initializeSession() {
-    this.isCheckingSession = true;
-
-    try {
-      const response = await getCurrentUserApi();
-
-      runInAction(() => {
-        this.user = response.user;
-        this.token = response.token || null;
-      });
-
-      return true;
-    } catch {
-      runInAction(() => {
-        this.user = null;
-        this.token = null;
-      });
-
-      return false;
-    } finally {
-      runInAction(() => {
-        this.isCheckingSession = false;
-      });
-    }
-  }
-
   private mapLoginError(message: string) {
     const lowerMessage = message.toLowerCase();
 
     if (
-      lowerMessage.includes("email") ||
-      lowerMessage.includes("account") ||
-      lowerMessage.includes("not found") ||
-      lowerMessage.includes("not registered")
+      lowerMessage.includes("not verified") ||
+      lowerMessage.includes("verify") ||
+      lowerMessage.includes("verification") ||
+      lowerMessage.includes("inactive") ||
+      lowerMessage.includes("disabled")
     ) {
-      this.setFieldError("email", "Wrong email");
+      this.setFieldError("general", message);
+      return;
+    }
+
+    if (
+      lowerMessage.includes("not found") ||
+      lowerMessage.includes("not registered") ||
+      lowerMessage.includes("does not exist") ||
+      lowerMessage.includes("no account")
+    ) {
+      this.setFieldError("email", "This email address has not been registered.");
       return;
     }
 
     if (
       lowerMessage.includes("password") ||
-      lowerMessage.includes("credential")
+      lowerMessage.includes("credential") ||
+      lowerMessage.includes("invalid") ||
+      lowerMessage.includes("unauthorized") ||
+      lowerMessage.includes("forbidden")
     ) {
-      this.setFieldError("password", "Wrong password");
+      this.setFieldError("password", "Wrong password.");
       return;
     }
 
@@ -180,7 +195,18 @@ class AuthStore {
     const lowerMessage = message.toLowerCase();
 
     if (
-      lowerMessage.includes("email") ||
+      lowerMessage.includes("full_name") ||
+      lowerMessage.includes("full name") ||
+      lowerMessage.includes("name")
+    ) {
+      this.setFieldError("full_name", "Full name is required.");
+      return;
+    }
+
+    if (
+      lowerMessage.includes("user_already_exists") ||
+      lowerMessage.includes("already exists") ||
+      lowerMessage.includes("already registered") ||
       lowerMessage.includes("registered") ||
       lowerMessage.includes("exist")
     ) {
@@ -188,6 +214,14 @@ class AuthStore {
         "email",
         "This email address has already been registered."
       );
+      return;
+    }
+
+    if (
+      lowerMessage.includes("email") &&
+      (lowerMessage.includes("invalid") || lowerMessage.includes("required"))
+    ) {
+      this.setFieldError("email", message);
       return;
     }
 
@@ -207,6 +241,35 @@ class AuthStore {
     this.setFieldError("general", message);
   }
 
+  async initializeSession() {
+    if (!this.token) {
+      return false;
+    }
+
+    this.isCheckingSession = true;
+
+    try {
+      const user = await getCurrentUserApi();
+
+      runInAction(() => {
+        this.user = user;
+      });
+
+      return true;
+    } catch {
+      runInAction(() => {
+        this.user = null;
+        this.clearTokens();
+      });
+
+      return false;
+    } finally {
+      runInAction(() => {
+        this.isCheckingSession = false;
+      });
+    }
+  }
+
   async login(payload: LoginPayload) {
     if (this.isLoginLocked) {
       this.setFieldError(
@@ -220,21 +283,32 @@ class AuthStore {
     this.clearMessages();
 
     try {
-      const response = await loginApi({
+      const loginResponse = await loginApi({
         email: payload.email.trim().toLowerCase(),
         password: payload.password,
       });
 
       runInAction(() => {
-        this.user = response.user;
-        this.token = response.token || null;
-        this.success = response.message || "Login successful.";
+        this.saveTokens(
+          loginResponse.access_token,
+          loginResponse.refresh_token
+        );
+      });
+
+      const user = await getCurrentUserApi();
+
+      runInAction(() => {
+        this.user = user;
+        this.success = "Login successful.";
         this.resetFailedLoginAttempts();
       });
 
       return true;
     } catch (error) {
       runInAction(() => {
+        this.user = null;
+        this.clearTokens();
+
         const message =
           error instanceof Error
             ? error.message
@@ -253,39 +327,42 @@ class AuthStore {
   }
 
   async register(payload: RegisterPayload) {
-  this.isLoading = true;
-  this.clearMessages();
+    this.isLoading = true;
+    this.clearMessages();
 
-  try {
-    const response = await registerApi({
-      email: payload.email.trim().toLowerCase(),
-      password: payload.password,
-      confirmPassword: payload.confirmPassword,
-    });
+    try {
+      const response = await registerApi({
+        full_name: payload.full_name.trim(),
+        email: payload.email.trim().toLowerCase(),
+        password: payload.password,
+        confirmPassword: payload.confirmPassword,
+      });
 
-    runInAction(() => {
-      this.success =
-        response.message || "Check your email to confirm your account.";
-    });
+      runInAction(() => {
+        this.setResetEmail(payload.email);
+        this.success =
+          response.message ||
+          "Account created. Check your email for the verification OTP.";
+      });
 
-    return true;
-  } catch (error) {
-    runInAction(() => {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Registration failed. Please try again.";
+      return true;
+    } catch (error) {
+      runInAction(() => {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Registration failed. Please try again.";
 
-      this.mapRegisterError(message);
-    });
+        this.mapRegisterError(message);
+      });
 
-    return false;
-  } finally {
-    runInAction(() => {
-      this.isLoading = false;
-    });
+      return false;
+    } finally {
+      runInAction(() => {
+        this.isLoading = false;
+      });
+    }
   }
-}
 
   async sendOtp(email: string) {
     this.isLoading = true;
@@ -380,10 +457,11 @@ class AuthStore {
 
     try {
       const response = await resetPasswordApi({
-        email: this.resetEmail,
-        password: payload.password,
-        confirmPassword: payload.confirmPassword,
-      });
+  email: this.resetEmail,
+  otp: payload.otp,
+  new_password: payload.new_password,
+  confirmPassword: payload.confirmPassword,
+});
 
       runInAction(() => {
         this.success =
@@ -439,7 +517,7 @@ class AuthStore {
 
   async logout() {
     this.user = null;
-    this.token = null;
+    this.clearTokens();
     this.clearResetEmail();
     this.clearMessages();
 
