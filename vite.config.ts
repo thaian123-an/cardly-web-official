@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api/v1": {
-        target: "https://cardly-backend-718707317854.asia-southeast1.run.app",
+        target: "https://cardly-backend-1028715078909.asia-southeast1.run.app",
         changeOrigin: true,
         secure: true,
       },
