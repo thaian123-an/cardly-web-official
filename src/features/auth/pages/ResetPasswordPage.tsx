@@ -1,58 +1,80 @@
 import { observer } from "mobx-react-lite";
-import { ArrowLeft, KeyRound } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { AuthInput } from "../components/AuthInput";
 import { AuthLayout } from "../components/AuthLayout";
 import { PasswordInput } from "../components/PasswordInput";
 import { PasswordRules } from "../components/PasswordRules";
 import { authStore } from "../stores/AuthStore";
-import { isStrongPassword } from "../../../utils/validators";
+
+const hasUppercase = (value: string) => /[A-Z]/.test(value);
+const hasDigit = (value: string) => /\d/.test(value);
+const hasSpecial = (value: string) => /[^A-Za-z0-9]/.test(value);
+const hasNoSpace = (value: string) => !/\s/.test(value);
 
 export const ResetPasswordPage = observer(() => {
   const navigate = useNavigate();
 
-  const [otp, setOtp] = useState("");
-  const [password, setPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
   useEffect(() => {
     authStore.clearMessages();
 
-    if (!authStore.resetEmail) {
+    if (!authStore.resetToken) {
       navigate("/forgot-password", { replace: true });
     }
 
-    return () => authStore.clearMessages();
+    return () => {
+      authStore.clearMessages();
+    };
   }, [navigate]);
 
-  const canSubmit = useMemo(() => {
+  const isPasswordValid = useMemo(() => {
     return (
-      otp.length === 6 &&
-      isStrongPassword(password) &&
-      password === confirmPassword &&
-      !authStore.isLoading
+      newPassword.length >= 8 &&
+      hasUppercase(newPassword) &&
+      hasDigit(newPassword) &&
+      hasSpecial(newPassword) &&
+      hasNoSpace(newPassword)
     );
-  }, [otp, password, confirmPassword]);
+  }, [newPassword]);
+
+  const isSubmitDisabled = useMemo(() => {
+    return (
+      authStore.isLoading ||
+      !newPassword ||
+      !confirmPassword ||
+      !isPasswordValid ||
+      newPassword !== confirmPassword
+    );
+  }, [newPassword, confirmPassword, isPasswordValid]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     authStore.clearMessages();
 
-    if (otp.length !== 6) {
-      authStore.setFieldError("otp", "Please enter a valid 6-digit OTP code.");
+    if (!newPassword) {
+      authStore.setFieldError("password", "Password is required.");
       return;
     }
 
-    if (!isStrongPassword(password)) {
+    if (!isPasswordValid) {
       authStore.setFieldError(
         "password",
-        "Password must meet all strength requirements."
+        "Password does not meet security requirements."
       );
       return;
     }
 
-    if (password !== confirmPassword) {
+    if (!confirmPassword) {
+      authStore.setFieldError(
+        "confirmPassword",
+        "Please confirm your password."
+      );
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
       authStore.setFieldError(
         "confirmPassword",
         "The verification password does not match."
@@ -61,9 +83,8 @@ export const ResetPasswordPage = observer(() => {
     }
 
     const success = await authStore.resetPassword({
-      email: authStore.resetEmail,
-      otp,
-      new_password: password,
+      reset_token: authStore.resetToken,
+      new_password: newPassword,
       confirmPassword,
     });
 
@@ -71,55 +92,43 @@ export const ResetPasswordPage = observer(() => {
       window.setTimeout(() => {
         authStore.clearMessages();
         navigate("/login", { replace: true });
-      }, 1600);
+      }, 1200);
     }
   };
 
   return (
     <AuthLayout
-      title="Set a new password"
-      description="Use the OTP from your email and create a strong new password."
+      title="Create new password"
+      description="Set a strong new password after verifying your reset OTP."
+      bullets={[
+        "Minimum 8 characters",
+        "Uppercase, number, and special character",
+        "No spaces allowed",
+      ]}
     >
       <div className="auth-card">
-        <button
-          type="button"
-          className="auth-back-button"
-          onClick={() => navigate("/forgot-password", { replace: true })}
-        >
-          <ArrowLeft size={28} />
-        </button>
+        <Link to="/forgot-password" className="auth-back-link">
+          ←
+        </Link>
 
         <h2>Reset Password</h2>
         <p className="auth-card__subtitle">
-          Enter the OTP sent to <strong>{authStore.resetEmail}</strong> and set
-          your new password.
+          Enter your new password to complete account recovery.
         </p>
 
         <form className="auth-form" onSubmit={handleSubmit} noValidate>
-          <AuthInput
-            icon={<KeyRound size={22} />}
-            placeholder="OTP Code"
-            value={otp}
-            error={authStore.fieldErrors.otp}
-            maxLength={6}
-            onChange={(event) => {
-              setOtp(event.target.value.replace(/\D/g, ""));
-              authStore.clearFieldError("otp");
-            }}
-          />
-
           <PasswordInput
             placeholder="New Password"
-            value={password}
+            value={newPassword}
             error={authStore.fieldErrors.password}
             onChange={(event) => {
-              setPassword(event.target.value);
+              setNewPassword(event.target.value);
               authStore.clearFieldError("password");
             }}
             autoComplete="new-password"
           />
 
-          <PasswordRules password={password} />
+          <PasswordRules password={newPassword} />
 
           <PasswordInput
             placeholder="Confirm Password"
@@ -147,14 +156,14 @@ export const ResetPasswordPage = observer(() => {
           <button
             type="submit"
             className="auth-primary-button"
-            disabled={!canSubmit}
+            disabled={isSubmitDisabled}
           >
             {authStore.isLoading ? "Resetting..." : "Reset Password"}
           </button>
         </form>
 
         <p className="auth-switch">
-          <Link to="/login">Back to login</Link>
+          Remember password? <Link to="/login">Login</Link>
         </p>
       </div>
     </AuthLayout>

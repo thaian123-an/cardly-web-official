@@ -9,9 +9,11 @@ import {
   getCurrentUserApi,
   loginApi,
   logoutApi,
+  refreshTokenApi,
   registerApi,
   resetPasswordApi,
   verifyOtpApi,
+  verifyResetOtpApi,
 } from "../services/authApi";
 import type {
   AuthField,
@@ -23,6 +25,7 @@ import type {
 } from "../types/auth.types";
 
 const RESET_EMAIL_KEY = "cardly_reset_email";
+const RESET_TOKEN_KEY = "cardly_reset_token";
 const REFRESH_TOKEN_KEY = "cardly_refresh_token";
 const LOGIN_FAILED_COUNT_KEY = "cardly_login_failed_count";
 const LOGIN_LOCKED_UNTIL_KEY = "cardly_login_locked_until";
@@ -33,9 +36,10 @@ class AuthStore {
   refreshToken: string | null = null;
 
   resetEmail = "";
+  resetToken = "";
 
   isLoading = false;
-  isCheckingSession = false;
+  isCheckingSession = true;
 
   error = "";
   success = "";
@@ -48,8 +52,9 @@ class AuthStore {
     makeAutoObservable(this);
 
     this.token = getAccessToken();
-    this.refreshToken = sessionStorage.getItem(REFRESH_TOKEN_KEY);
+    this.refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
     this.resetEmail = sessionStorage.getItem(RESET_EMAIL_KEY) || "";
+    this.resetToken = sessionStorage.getItem(RESET_TOKEN_KEY) || "";
 
     this.failedLoginCount = Number(
       localStorage.getItem(LOGIN_FAILED_COUNT_KEY) || 0
@@ -58,14 +63,27 @@ class AuthStore {
     this.loginLockedUntil = Number(
       localStorage.getItem(LOGIN_LOCKED_UNTIL_KEY) || 0
     );
+
+    if (this.loginLockedUntil > 0 && this.loginLockRemainingSeconds <= 0) {
+      this.resetFailedLoginAttempts();
+    }
   }
 
   get isAuthenticated() {
     return Boolean(this.token && this.user);
   }
 
+  get hasStoredSession() {
+    return Boolean(this.token || this.refreshToken);
+  }
+
   get loginLockRemainingSeconds() {
+    if (!this.loginLockedUntil) {
+      return 0;
+    }
+
     const remaining = Math.ceil((this.loginLockedUntil - Date.now()) / 1000);
+
     return Math.max(remaining, 0);
   }
 
@@ -116,12 +134,27 @@ class AuthStore {
     sessionStorage.removeItem(RESET_EMAIL_KEY);
   }
 
+  setResetToken(resetToken: string) {
+    this.resetToken = resetToken;
+    sessionStorage.setItem(RESET_TOKEN_KEY, resetToken);
+  }
+
+  clearResetToken() {
+    this.resetToken = "";
+    sessionStorage.removeItem(RESET_TOKEN_KEY);
+  }
+
+  clearResetFlow() {
+    this.clearResetEmail();
+    this.clearResetToken();
+  }
+
   private saveTokens(accessToken: string, refreshToken: string) {
     this.token = accessToken;
     this.refreshToken = refreshToken;
 
     setAccessToken(accessToken);
-    sessionStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+    localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
   }
 
   private clearTokens() {
@@ -129,7 +162,7 @@ class AuthStore {
     this.refreshToken = null;
 
     removeAccessToken();
-    sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
   }
 
   private resetFailedLoginAttempts() {
@@ -148,8 +181,14 @@ class AuthStore {
 
     if (nextCount >= 5) {
       const lockedUntil = Date.now() + 60 * 1000;
+
       this.loginLockedUntil = lockedUntil;
       localStorage.setItem(LOGIN_LOCKED_UNTIL_KEY, String(lockedUntil));
+
+      this.setFieldError(
+        "general",
+        "Too many failed attempts. Please try again in 60s."
+      );
     }
   }
 
@@ -242,13 +281,24 @@ class AuthStore {
   }
 
   async initializeSession() {
-    if (!this.token) {
-      return false;
-    }
-
     this.isCheckingSession = true;
 
     try {
+      if (!this.token && this.refreshToken) {
+        const refreshedTokens = await refreshTokenApi(this.refreshToken);
+
+        runInAction(() => {
+          this.saveTokens(
+            refreshedTokens.access_token,
+            refreshedTokens.refresh_token
+          );
+        });
+      }
+
+      if (!this.token) {
+        return false;
+      }
+
       const user = await getCurrentUserApi();
 
       runInAction(() => {
@@ -271,6 +321,10 @@ class AuthStore {
   }
 
   async login(payload: LoginPayload) {
+    if (this.loginLockedUntil > 0 && this.loginLockRemainingSeconds <= 0) {
+      this.resetFailedLoginAttempts();
+    }
+
     if (this.isLoginLocked) {
       this.setFieldError(
         "general",
@@ -365,54 +419,77 @@ class AuthStore {
   }
 
   async sendOtp(email: string) {
-    this.isLoading = true;
-    this.clearMessages();
+  this.isLoading = true;
+  this.clearMessages();
 
-    try {
-      const normalizedEmail = email.trim().toLowerCase();
+  try {
+    const normalizedEmail = email.trim().toLowerCase();
 
-      const response = await forgotPasswordApi({
-        email: normalizedEmail,
-      });
+    const response = await forgotPasswordApi({
+      email: normalizedEmail,
+    });
 
-      runInAction(() => {
-        this.setResetEmail(normalizedEmail);
-        this.success =
-          response.message || "The OTP code has been sent, valid for 5 minutes.";
-      });
+    runInAction(() => {
+      const responseMessage = response.message || "";
+      const lowerMessage = responseMessage.toLowerCase();
 
-      return true;
-    } catch (error) {
-      runInAction(() => {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Unable to send OTP. Please try again.";
+      if (
+        response.success === false ||
+        lowerMessage.includes("user_not_found") ||
+        lowerMessage.includes("not found") ||
+        lowerMessage.includes("not registered") ||
+        lowerMessage.includes("account is not registered") ||
+        lowerMessage.includes("does not exist")
+      ) {
+        this.setFieldError("email", "This account is not registered.");
+        return;
+      }
 
-        const lowerMessage = message.toLowerCase();
+      this.setResetEmail(normalizedEmail);
+      this.clearResetToken();
+      this.success =
+        responseMessage || "The OTP code has been sent, valid for 3 minutes.";
+    });
 
-        if (
-          lowerMessage.includes("email") ||
-          lowerMessage.includes("registered") ||
-          lowerMessage.includes("not found")
-        ) {
-          this.setFieldError(
-            "email",
-            "This email address has not been registered."
-          );
-          return;
-        }
-
-        this.setFieldError("general", message);
-      });
-
+    if (
+      this.fieldErrors.email === "This account is not registered." ||
+      this.fieldErrors.general
+    ) {
       return false;
-    } finally {
-      runInAction(() => {
-        this.isLoading = false;
-      });
     }
+
+    return true;
+  } catch (error) {
+    runInAction(() => {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to send OTP. Please try again.";
+
+      const lowerMessage = message.toLowerCase();
+
+      if (
+        lowerMessage.includes("user_not_found") ||
+        lowerMessage.includes("not found") ||
+        lowerMessage.includes("not registered") ||
+        lowerMessage.includes("account is not registered") ||
+        lowerMessage.includes("does not exist") ||
+        lowerMessage.includes("404")
+      ) {
+        this.setFieldError("email", "This account is not registered.");
+        return;
+      }
+
+      this.setFieldError("general", message);
+    });
+
+    return false;
+  } finally {
+    runInAction(() => {
+      this.isLoading = false;
+    });
   }
+}
 
   async verifyOtp(otp: string) {
     this.isLoading = true;
@@ -451,22 +528,71 @@ class AuthStore {
     }
   }
 
+  async verifyResetOtp(otp: string) {
+    this.isLoading = true;
+    this.clearMessages();
+
+    try {
+      const response = await verifyResetOtpApi({
+        email: this.resetEmail,
+        otp,
+      });
+
+      runInAction(() => {
+        this.setResetToken(response.reset_token);
+        this.success = "OTP verified successfully.";
+      });
+
+      return true;
+    } catch (error) {
+      runInAction(() => {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "OTP verification failed. Please try again.";
+
+        const lowerMessage = message.toLowerCase();
+
+        if (lowerMessage.includes("expired")) {
+          this.setFieldError("otp", "OTP code has expired.");
+          return;
+        }
+
+        if (
+          lowerMessage.includes("invalid") ||
+          lowerMessage.includes("incorrect") ||
+          lowerMessage.includes("wrong")
+        ) {
+          this.setFieldError("otp", "Incorrect OTP code.");
+          return;
+        }
+
+        this.setFieldError("general", message);
+      });
+
+      return false;
+    } finally {
+      runInAction(() => {
+        this.isLoading = false;
+      });
+    }
+  }
+
   async resetPassword(payload: ResetPasswordPayload) {
     this.isLoading = true;
     this.clearMessages();
 
     try {
       const response = await resetPasswordApi({
-  email: this.resetEmail,
-  otp: payload.otp,
-  new_password: payload.new_password,
-  confirmPassword: payload.confirmPassword,
-});
+        reset_token: payload.reset_token,
+        new_password: payload.new_password,
+        confirmPassword: payload.confirmPassword,
+      });
 
       runInAction(() => {
         this.success =
           response.message || "Password has been successfully reset.";
-        this.clearResetEmail();
+        this.clearResetFlow();
       });
 
       return true;
@@ -504,6 +630,18 @@ class AuthStore {
           return;
         }
 
+        if (
+          lowerMessage.includes("token") ||
+          lowerMessage.includes("expired") ||
+          lowerMessage.includes("invalid")
+        ) {
+          this.setFieldError(
+            "general",
+            "Reset session has expired. Please request a new OTP."
+          );
+          return;
+        }
+
         this.setFieldError("general", message);
       });
 
@@ -516,13 +654,15 @@ class AuthStore {
   }
 
   async logout() {
+    const currentRefreshToken = this.refreshToken;
+
     this.user = null;
     this.clearTokens();
-    this.clearResetEmail();
+    this.clearResetFlow();
     this.clearMessages();
 
     try {
-      await logoutApi();
+      await logoutApi(currentRefreshToken);
     } catch {
       // Không chặn logout UI nếu API logout lỗi.
     }

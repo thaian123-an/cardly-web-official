@@ -1,6 +1,6 @@
 import { observer } from "mobx-react-lite";
-import { ArrowLeft, Mail } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { Mail } from "lucide-react";
+import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AuthInput } from "../components/AuthInput";
 import { AuthLayout } from "../components/AuthLayout";
@@ -9,53 +9,48 @@ import { isValidEmail } from "../../../utils/validators";
 
 export const ForgotPasswordPage = observer(() => {
   const navigate = useNavigate();
-
   const [email, setEmail] = useState("");
-
-  useEffect(() => {
-    authStore.clearMessages();
-
-    return () => authStore.clearMessages();
-  }, []);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     authStore.clearMessages();
 
-    if (!email.trim()) {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail) {
       authStore.setFieldError("email", "Email is required.");
       return;
     }
 
-    if (!isValidEmail(email)) {
+    if (!isValidEmail(normalizedEmail)) {
       authStore.setFieldError("email", "Please enter a valid email address.");
       return;
     }
 
-    const success = await authStore.sendOtp(email);
+    const success = await authStore.sendOtp(normalizedEmail);
 
-    if (success) {
-      window.setTimeout(() => {
-        authStore.clearMessages();
-        navigate("/reset-password", { replace: true });
-      }, 700);
-    }
+if (success) {
+  window.setTimeout(() => {
+    authStore.clearMessages();
+    navigate("/reset-otp", { replace: true });
+  }, 700);
+}
   };
 
   return (
     <AuthLayout
       title="Reset access safely"
       description="Enter your registered email address and continue with OTP verification in the next step."
-      
+      bullets={[
+        "Email OTP verification",
+        "Secure password reset",
+        "Fast account recovery",
+      ]}
     >
       <div className="auth-card">
-        <button
-          type="button"
-          className="auth-back-button"
-          onClick={() => navigate("/login", { replace: true })}
-        >
-          <ArrowLeft size={28} />
-        </button>
+        <Link to="/login" className="auth-back-link">
+          ←
+        </Link>
 
         <h2>Forgot Password?</h2>
         <p className="auth-card__subtitle">

@@ -26,9 +26,13 @@ export interface VerifyOtpPayload {
   otp: string;
 }
 
-export interface ResetPasswordPayload {
-  email?: string;
+export interface VerifyResetOtpPayload {
+  email: string;
   otp: string;
+}
+
+export interface ResetPasswordPayload {
+  reset_token: string;
   new_password: string;
   confirmPassword: string;
 }
@@ -40,9 +44,15 @@ export interface LoginResponse {
   expires_in: number;
 }
 
-export interface ApiMessageResponse {
+export interface MessageResponse {
   success?: boolean;
-  message: string;
+  message?: string;
+}
+
+export interface VerifyResetOtpResponse {
+  success?: boolean;
+  message?: string;
+  reset_token: string;
 }
 
 export type AuthField =

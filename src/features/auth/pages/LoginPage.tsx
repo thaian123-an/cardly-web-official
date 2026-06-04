@@ -25,15 +25,42 @@ export const LoginPage = observer(() => {
       navigate("/home", { replace: true });
     }
 
-    const timer = window.setInterval(() => {
-      setLockSeconds(authStore.loginLockRemainingSeconds);
-    }, 1000);
-
     return () => {
-      window.clearInterval(timer);
       authStore.clearMessages();
     };
   }, [navigate]);
+
+  useEffect(() => {
+    const remainingSeconds = authStore.loginLockRemainingSeconds;
+
+    if (remainingSeconds > 0) {
+      setLockSeconds(remainingSeconds);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (lockSeconds <= 0) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setLockSeconds((prev) => Math.max(prev - 1, 0));
+    }, 1000);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [lockSeconds]);
+
+  useEffect(() => {
+    if (lockSeconds === 0) {
+      const generalError = authStore.fieldErrors.general || "";
+
+      if (generalError.toLowerCase().includes("too many failed attempts")) {
+        authStore.clearFieldError("general");
+      }
+    }
+  }, [lockSeconds]);
 
   const isLoginDisabled = useMemo(() => {
     return authStore.isLoading || lockSeconds > 0 || !email.trim() || !password;
@@ -71,11 +98,23 @@ export const LoginPage = observer(() => {
     });
 
     if (success) {
+      setLockSeconds(0);
+
       window.setTimeout(() => {
         authStore.clearMessages();
         navigate("/home", { replace: true });
       }, 700);
-    } else if (authStore.fieldErrors.password) {
+
+      return;
+    }
+
+    const remainingSeconds = authStore.loginLockRemainingSeconds;
+
+    if (remainingSeconds > 0) {
+      setLockSeconds(remainingSeconds);
+    }
+
+    if (authStore.fieldErrors.password) {
       setPassword("");
     }
   };
@@ -89,7 +128,6 @@ export const LoginPage = observer(() => {
         "Business contact management",
         "Web review dashboard",
       ]}
-    
     >
       <div className="auth-card">
         <h2>Sign In</h2>

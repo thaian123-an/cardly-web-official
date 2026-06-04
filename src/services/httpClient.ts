@@ -25,15 +25,15 @@ export class ApiError extends Error {
 }
 
 export function getAccessToken() {
-  return sessionStorage.getItem(ACCESS_TOKEN_KEY);
+  return localStorage.getItem(ACCESS_TOKEN_KEY);
 }
 
 export function setAccessToken(token: string) {
-  sessionStorage.setItem(ACCESS_TOKEN_KEY, token);
+  localStorage.setItem(ACCESS_TOKEN_KEY, token);
 }
 
 export function removeAccessToken() {
-  sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
 }
 
 function buildUrl(endpoint: string) {
@@ -86,6 +86,15 @@ function getErrorMessage(data: unknown) {
       typeof (record.error as { message?: unknown }).message === "string"
     ) {
       return (record.error as { message: string }).message;
+    }
+
+    if (
+      typeof record.error === "object" &&
+      record.error !== null &&
+      "code" in record.error &&
+      typeof (record.error as { code?: unknown }).code === "string"
+    ) {
+      return (record.error as { code: string }).code;
     }
   }
 
